@@ -19,7 +19,7 @@ https://drive.google.com/drive/folders/0B0uZYP7AohyhMHhjVFBlZ0F2ZVk
 Build Pictures:             
 https://www.flickr.com/photos/dwest2/albums/72157640062702294
 
-3D Printed Parts:
+3D Printed Parts:             
 https://www.thingiverse.com/thing:3070497
 
 Video Demo:          
