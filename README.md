@@ -10,7 +10,7 @@ Software Functionality:
 - When not activated, the chip will blink the lights every few seconds to indicate the meter is on.
 
 PCB Purchase:               
-https://www.etsy.com/shop/thatdecade
+https://www.etsy.com/shop/westabyelectronics
 
 Assembly Guide:            
 http://www.westaby.net/2016/05/updated-emf-reader-assembly-guide/
