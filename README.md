@@ -12,9 +12,13 @@ Software Functionality:
 PCB Purchase:               
 https://www.etsy.com/shop/westabyelectronics
 
-Assembly Guide:            
+Assembly Guides:            
 http://www.westaby.net/2016/05/updated-emf-reader-assembly-guide/
 https://drive.google.com/drive/folders/0B0uZYP7AohyhMHhjVFBlZ0F2ZVk
+
+Build Videos (2 parts):
+https://www.youtube.com/watch?v=ce4PJZl9T2Y
+https://www.youtube.com/watch?v=xNLr6XWCS7A
 
 Build Pictures:             
 https://www.flickr.com/photos/dwest2/albums/72157640062702294
