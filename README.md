@@ -11,6 +11,7 @@ Software Functionality:
 
 PCB Purchase:               
 https://www.etsy.com/shop/westabyelectronics
+https://www.tindie.com/products/westabyelectronics/parts-to-make-a-supernatural-emf-reader-prop/
 
 Assembly Guides:            
 http://www.westaby.net/2016/05/updated-emf-reader-assembly-guide/
