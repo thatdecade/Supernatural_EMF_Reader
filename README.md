@@ -14,9 +14,8 @@ PCB Purchase:
 - https://www.etsy.com/shop/westabyelectronics 
 - https://www.tindie.com/products/westabyelectronics/parts-to-make-a-supernatural-emf-reader-prop/
 
-Assembly Guides:            
+Part List and Assembly Photos:
 
-- http://www.westaby.net/2016/05/updated-emf-reader-assembly-guide/
 - https://drive.google.com/drive/folders/0B0uZYP7AohyhMHhjVFBlZ0F2ZVk
 
 Build Videos (2 parts):
