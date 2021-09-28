@@ -16,7 +16,7 @@ PCB Purchase:
 
 Part List and Assembly Photos:
 
-- https://drive.google.com/drive/folders/0B0uZYP7AohyhMHhjVFBlZ0F2ZVk
+- https://drive.google.com/drive/folders/0B0uZYP7AohyhMHhjVFBlZ0F2ZVk?resourcekey=0-Dtz2g_vjZ7N3NBrnY1d7NQ&usp=sharing
 
 Build Videos (2 parts):
 
