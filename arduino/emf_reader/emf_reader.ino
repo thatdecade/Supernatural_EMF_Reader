@@ -1,35 +1,33 @@
+//Source: https://the-techblog.com/en/lightorgan/
+
 /*
-   Prop EMF Reader, based on tv show Supernatural
-   Author: Dustin Westaby
-   Date: July 2015
+ * Audio Jack to Bargraph Test
+ * 
+ * Arduino Nano, Wiring
+ * 3.3V --- 5.1k ohm --- AREF
+ * A0 --- 10k ohm --- Audio Source --- 100K ohm --- ground
+ * 
+ * The jack to A0 resistors above can be modified for easier detection.
+ * Adding a DC level to the AC audio signal.
+ * 
+ *                               VCC
+ *                                |
+ *                               |R| 10k
+ *                                |
+ * Audio Jack Input ---- |C| ---- O ---- Audio + VCC/2 to MCU
+ *                      100nF     |
+ *                               |R| 10k
+ *                                |
+ *                               GND
+ */
 
-   Uses audio fx board from adafruit.
-   https://learn.adafruit.com/adafruit-audio-fx-sound-board/
+#include <arduinoFFT.h>
 
-   Build Pictures:
-   https://www.flickr.com/photos/dwest2/albums/72157640062702294
+#define AUDIO_INPUT_PIN A0
+#define THRESHOLD_INPUT_PIN A1
 
-*/
-
-
-#include <EEPROM.h>
-
-/* ----------------------------------
-    Pin Defines
-   ---------------------------------- */
-// Analog meter output, use potentiometer in series to trim down the max needle position
-#define METER_PIN 11
 #define MAX_METER_OUTPUT 100
 
-// Two or three position toggle switch for mode selection
-#define TOGGLE_LEFT_PIN 9
-#define TOGGLE_RIGHT_PIN 8
-
-// Button triggers effects
-#define HIDDEN_BUTTON_PIN 12
-#define HIDDEN_LED_PIN 13
-
-// LEDs swing with meter position
 byte LED_PIN_MAP[6] =
 {
   2,   // LED 1
@@ -37,308 +35,142 @@ byte LED_PIN_MAP[6] =
   4,   // LED 3
   5,   // LED 4
   6,   // LED 5
-  HIDDEN_LED_PIN
 };
 
-/* ----------------------------------
-    Globals
-   ---------------------------------- */
-//audio clip selection is stored in eeprom
-byte audio_clip_selected = 1;
-#define MAX_AUDIO_CLIPS 5
+#define FFT_ANIMATION_DELAY   1
+#define PROP_ANIMATION_DELAY 50
 
-//initial data for globals
-byte left_toggle_state = LOW;
-byte right_toggle_state = LOW;
-byte hidden_button_powerup_state = LOW;
-unsigned long lastEvent = 0;
-byte secret_waiting = false;
+/* ******************************************************************************
+ * FFT Stuff
+ ****************************************************************************** */
+#define SAMPLES 64  // must be a power of 2
+ 
+// defines how much brigthness the LEDs will loose each loop
+// 5 is the maximum --> the organ will be very responsive
+// lower will smootly the the leds if no new peak is detected 
+#define decayPerLoop 1
+#define growthPerLoop 5
+ 
+arduinoFFT FFT = arduinoFFT();      
 
-/* ----------------------------------
+typedef enum FREQ_RANGE
+{
+  BASS = 0,
+  MID,
+  HIGHS,
+} freq_range_e;
+ 
+/* ******************************************************************************
     Source Code
-   ---------------------------------- */
-void setup() {
-  //Initialize serial and wait for port to open:
-  Serial.begin(9600);
-
-  /* Start with LEDs off (outputs) */
+ ****************************************************************************** */
+void setup()
+{
+  //Serial.begin(9600);
+  
+  // define the analog voltage reference
+  analogReference(DEFAULT);
+ 
   for ( byte i=0; i < sizeof(LED_PIN_MAP); i++)
   {
     pinMode(LED_PIN_MAP[i], OUTPUT);
     digitalWrite(LED_PIN_MAP[i], LOW);
   }
-
-  pinMode(METER_PIN, OUTPUT);
-  pinMode(TOGGLE_LEFT_PIN, INPUT_PULLUP);
-  pinMode(TOGGLE_RIGHT_PIN, INPUT_PULLUP);
-  pinMode(HIDDEN_BUTTON_PIN, INPUT_PULLUP);
-
-  //retrieve and validate data from eeprom
-  audio_clip_selected = EEPROM.read(0);
-  if( ( audio_clip_selected == 0 ) ||
-      ( audio_clip_selected > MAX_AUDIO_CLIPS ) )
-  {
-     audio_clip_selected = 1;
-
-     //fix eeprom
-     EEPROM.write(0, audio_clip_selected);
-
-    //indicate EEPROM was reset (LED stays on until button is pressed)
-    digitalWrite(HIDDEN_LED_PIN, HIGH);
-  }
-
-  //Hidden button is read during a power cycle to determine alternate mode request
-  hidden_button_powerup_state = digitalRead(HIDDEN_BUTTON_PIN);
-
-  //chirp LED to confirm button pressed during startup
-  if(hidden_button_powerup_state == LOW)
-  {
-    digitalWrite(HIDDEN_LED_PIN, HIGH);
-    delay(200);
-    digitalWrite(HIDDEN_LED_PIN, LOW);
-  }
+  
+  //Serial.write("FFT Ready");
 }
+ 
+    
+void loop()
+{   
+  static long analisis_timer = 0;
 
-void loop() {
-
-  //Check toggle position every loop
-  left_toggle_state  = digitalRead(TOGGLE_LEFT_PIN);
-  right_toggle_state = digitalRead(TOGGLE_RIGHT_PIN);
-
-  if(hidden_button_powerup_state == HIGH)
+  // wait one millisecond for the next analysis
+  if(analisis_timer < millis())
   {
-    if(left_toggle_state == LOW)
-    {
-      //Primary Left Mode
-      forward_quiet();
-      power_on_indicator();
-      secret_waiting = false;
-    }
-    else if(right_toggle_state == LOW)
-    {
-      //Primary Right Mode
-      prop_mode_single(1); //runs on trigger only
-      power_on_indicator();
-      secret_waiting = false;
-    }
-    else
-    {
-      //Primary Center Mode (secret)
-      if(secret_ready())
-      {
-        select_sound();
-      }
-    }
+    analisis_timer = millis() + 1;
+    
+    analyze_audio_update_bargraph();
   }
-  else
-  {
-    if(left_toggle_state == LOW)
-    {
-      //Secondary Left Mode
-      reverse_quiet();
-      power_on_indicator();
-      secret_waiting = false;
-    }
-    else if(right_toggle_state == LOW)
-    {
-      //Secondary Right Mode
-      prop_mode_single(0); //no trigger, always runs
-      power_on_indicator();
-      secret_waiting = false;
-    }
-    else
-    {
-      //Secondary Center Mode (secret)
-      if(secret_ready())
-      {
-        lamp_test();
-      }
-    }
-  }
-
-
 }
 
 /* ******************************************************************************
- * Setup Functions
+ * Sub-Functions for Audio Analysis
  ****************************************************************************** */
 
-void power_on_indicator()
+void analyze_audio_update_bargraph()
 {
-  //Power ON indicator
-  //blink the bottom LED for every 10 seconds without button press
-  if(millis() - lastEvent > 10000)
+  double vReal[SAMPLES], vImag[SAMPLES];
+  static double max_reading = 5; //assume at least 5
+  static double temp_sums;
+  int user_threshold;
+  char temp[20];
+  
+  // collect Samples
+  for(int i=0; i < SAMPLES; i++)
   {
-    bargraph_only(1); //50ms chirp
-    bargraph_only(0);
-
-    //reset timeout
-    lastEvent = millis();
+    int sample = analogRead(AUDIO_INPUT_PIN); // read the voltage at the analog pin
+    vReal[i] = sample/4-128;        // compress the data and getting rid of DC-Voltage 
+    vImag[i] = 0;                   // reset old imaginary part of the FFT
   }
+  
+  // let the fourier transform do his magic
+  FFT.Windowing(vReal, SAMPLES, FFT_WIN_TYP_HAMMING, FFT_FORWARD);
+  FFT.Compute(vReal, vImag, SAMPLES, FFT_FORWARD);
+  FFT.ComplexToMagnitude(vReal, vImag, SAMPLES);
+  
+  // calculate average loudness of the different frequency bands
+  //temp_sums  = calculateBars(vReal, vImag,  1,  3, temp_sums); //Bass
+  temp_sums   = calculateBars(vReal, vImag,  4, 40, temp_sums); //Mids
+  //temp_sums = calculateBars(vReal, vImag, 40, 63, temp_sums); //High
+  
+  //sprintf(temp,"Sum= %i",(int)temp_sums);
+  //Serial.println(temp);
+  
+  //use max observed for mapping (TBD, allo max reset when audio clips change)
+  if(temp_sums > max_reading)
+  {
+    max_reading = temp_sums;
+  }
+  
+  //get user threshold and convert to percent
+  user_threshold = map(analogRead(THRESHOLD_INPUT_PIN),0,1023,0,100);
+  
+  // light a number of bars matching the average, scaled with max * user percentage
+  bargraph_only(map(temp_sums,0,max_reading*user_threshold/100,0,5), FFT_ANIMATION_DELAY);
 }
-
-byte secret_ready()
-{
-  //Do not run secret mode when toggle is flipped and momentarily hits center.
-  //  Only run if it is held in the center for a while
-  if (secret_waiting == false)
+ 
+double calculateBars(double vReal[], double vImag[], int first, int last, double oldSum){
+  double newSum = 0;
+ 
+  // sum up all absolute value of the complex numbers (it's just the pythagorean theorem)
+  for(int i=first; i < last; i++)  
   {
-    //toggle switch hit center, reset the timer
-    lastEvent = millis();
-    secret_waiting = true;
+    newSum += sqrt(vReal[i] * vReal[i] + vImag[i] * vImag[i]);
   }
-
-  if(millis() - lastEvent > 1000)
+  
+  newSum = newSum/(last-first-1);         // divide to get the the average loudness
+  newSum = constrain(newSum,0,5000);      // crop the number above 5000 
+  newSum = map(newSum,0,5000,0,1024);     // map it between 0 and 1024
+ 
+  oldSum -= decayPerLoop;                 // substract the decay from the old brightness
+  if(newSum > oldSum)
   {
-    //allow the secret mode, but do not reset the timer
-    return 1;
-  }
-  else
-  {
-    return 0;
-  }
-}
-
-void select_sound()
-{
-  static byte blink_counter = 0;
-
-  bargraph_only(audio_clip_selected);
-
-  if (digitalRead(HIDDEN_BUTTON_PIN) == HIGH)
-  {
-    //button not pressed
-
-    //blink LED
-    blink_counter++;
-    digitalWrite(HIDDEN_LED_PIN, 1 & blink_counter);
-  }
-  else //button pressed
-  {
-    //next audio clip
-    audio_clip_selected++;
-    if( ( audio_clip_selected == 0 ) ||
-        ( audio_clip_selected > MAX_AUDIO_CLIPS ) )
+    // if the old brightness is now lower then the new, the new brightness will be outputted 
+    oldSum += growthPerLoop;
+    if(oldSum >= newSum)
     {
-       audio_clip_selected = 1;
+      oldSum = newSum;
     }
-
-    //save selection
-    EEPROM.write(0, audio_clip_selected);
-
-    //play audio and display number
-    Serial.println("q"); //stop audio (if playing)
-    delay(25);
-    play_audio();
-    bargraph_only(audio_clip_selected);
-
-    //wait for button release
-    delay(100);
-    while(!digitalRead(HIDDEN_BUTTON_PIN));
   }
-}
-
-void lamp_test()
-{
-  //Turns on each LED in sequence to ensure everything is working
-  //  Also tests the meter (stays at max for 3 seconds to allow adjustment)
-
-  for ( byte i=0; i < 6; i++)
-  {
-    bargraph_and_meter(i);
-    delay(1000);
-  }
-  digitalWrite(LED_PIN_MAP[5], HIGH);
-  delay(1000);
-  digitalWrite(LED_PIN_MAP[5], LOW);
-  delay(1000);
-  Serial.println("#0"); //play sound bank 0
-}
-
-/* ******************************************************************************
- * Prop Functions
- ****************************************************************************** */
-
-void prop_mode_single(byte trigger_enable)
-{
-  byte button_read;
-
-  //pull seed from right side potentiometer
-  randomSeed(analogRead(1));
-
-  if(trigger_enable == true)
-  {
-    button_read = digitalRead(HIDDEN_BUTTON_PIN);
-  }
-  else
-  {
-    button_read = LOW;
-  }
-
-  if(button_read == LOW)
-  {
-    play_audio();
-    bargraph_and_meter(5);
-    delay(100);
-
-    for( byte i=0; i<7; i++)
-    {
-      bargraph_and_meter(2 + random(0,4));
-      delay(100);
-    }
-    bargraph_and_meter(0);
-
-    //reset timeout
-    lastEvent = millis();
-  }
-}
-
-void forward_quiet()
-{
-  while( digitalRead(HIDDEN_BUTTON_PIN) == LOW)
-  {
-    bargraph_and_meter(5);
-
-    //reset timeout
-    lastEvent = millis();
-  }
-  bargraph_and_meter(0);
-}
-
-void reverse_quiet()
-{
-  while( digitalRead(HIDDEN_BUTTON_PIN) == LOW)
-  {
-    bargraph_and_meter(0);
-  }
-  bargraph_and_meter(5);
-
-  //Disable the Power ON indicator
-  lastEvent = millis();
+ 
+  return oldSum;
 }
 
 /* ******************************************************************************
  * Sub-Functions for Lights and Neter
  ****************************************************************************** */
 
-void bargraph_and_meter(int current_number)
-{
-  //this wrapper function allows the bargraph and meter functions to be combined
-
-  /* Update Analog meter */
-  meter_only(current_number);
-
-  // Update bargraph
-  bargraph_only(current_number);
-}
-
-void meter_only(int current_number)
-{
-  /* Update Analog meter */
-  analogWrite(METER_PIN, map(current_number, 0, 5, 0, MAX_METER_OUTPUT));
-}
-
-void bargraph_only(int current_number)
+void bargraph_only(int current_number, byte delay_ms)
 {
   static int last_number = 0;
 
@@ -355,7 +187,7 @@ void bargraph_only(int current_number)
     for ( int i = last_number; i < current_number; i++)
     {
       digitalWrite(LED_PIN_MAP[i], HIGH);
-      delay(50);
+      delay(delay_ms);
     }
   }
   else
@@ -364,53 +196,10 @@ void bargraph_only(int current_number)
     for ( int i = last_number; i >= current_number; i--)
     {
       digitalWrite(LED_PIN_MAP[i], LOW);
-      delay(50);
+      delay(delay_ms);
     }
   }
 
   //update number
   last_number = current_number;
-}
-
-/* ******************************************************************************
- * Sub-Functions for Audio
- ****************************************************************************** */
-
-void play_audio()
-{
-    /*  Finding the least expensive method of sending strings with a variable:
-
-      Method 1: Do not combine Strings
-        Serial.print("#");
-        Serial.println(audio_clip_selected);
-      Conclusion 1: 434 bytes for println val and print const
-
-      Method 2: Combine Strings
-        Serial.println(String("#" + audio_clip_selected));
-      Conclusion 2: 958 bytes for string concatinate
-
-      Method 3: Use constants and branch statements
-        (see below)
-      Conclusion 3: 158 bytes for case switch and println
-  */
-
-  switch (audio_clip_selected)
-  {
-    case 1:
-      Serial.println("#0");
-      break;
-    case 2:
-      Serial.println("#1");
-      break;
-    case 3:
-      Serial.println("#2");
-      break;
-    case 4:
-      Serial.println("#3");
-      break;
-    case 5:
-    default:  //max selection is clamped to 5
-      Serial.println("#4");
-      break;
-  }
 }
