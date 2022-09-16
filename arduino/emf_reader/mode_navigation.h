@@ -32,7 +32,6 @@ enum menu_page_order
    
    //settings items
    SET_AUDIO_SELECTION,
-   SAVE_AUDIO_SELECTION,
    EXIT_AUDIO_SELECTION,
    
    LAST_MENU_ITEM,

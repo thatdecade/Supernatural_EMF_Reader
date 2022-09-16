@@ -227,8 +227,8 @@ void process_hidden_hold()
         set_software_state(SET_AUDIO_SELECTION);
         break;
       case SET_AUDIO_SELECTION:
-        // user wants to exit settings. Save the settings
-        set_software_state(SAVE_AUDIO_SELECTION);
+        // user wants to exit settings. Send to previous mode
+        set_software_state(EXIT_AUDIO_SELECTION);
         break;
       
       default:

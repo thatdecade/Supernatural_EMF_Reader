@@ -102,9 +102,7 @@ arduinoFFT FFT = arduinoFFT();
  ****************************************************************************** */
 void setup()
 {
-#ifdef ENABLE_SERIAL_DEBUG
   Serial.begin(9600);
-#endif
   
   analogReference(ANALOG_REFERENCE);
  
@@ -146,7 +144,6 @@ void setup()
 void loop()
 {   
   static long analysis_timer = 0;
-  uint8_t value = 0;
 
   // wait one millisecond for the next analysis
   if(analysis_timer < millis())
@@ -157,45 +154,111 @@ void loop()
     process_mode_selection();
     
     run_schedule_for_mode();
-    
-    value = get_audio_analysis_0_to_5();
   }
   
-  //TBD: do things based on program mode
+  //TBD: check for sleep
   
-  bargraph_only(value, FFT_ANIMATION_DELAY);
 }
 
 void run_schedule_for_mode()
 {
-	switch(get_software_state())
+	static uint8_t previous_state = 0;
+	uint8_t current_state = get_software_state();
+	bool trigger = get_trigger_event_and_clear(); //this is a consume once value
+	
+	if(current_state != previous_state)
 	{
-    //system items
+		//TBD, perform do once actions on state change
+		
+		//blink bargraph to indicate the selected mode
+		
+		previous_state = current_state;
+	}
+	
+	switch(current_state)
+	{
+		/* ************ */
+    /* SYSTEM MODES */
+		/* ************ */
     case GO_TO_SLEEP:
-    	//TBD
+    	set_software_state(SLEEPING);
+    	//TBD, turn off sound card and amp
+    	//TBD, add sleep code
     	break;
     case SLEEPING:
-    	//TBD
-    	break;
-    case INITILIZATION:
+    	//TBD, when we return from sleep go back to init
     	set_software_state(INITILIZATION);
     	break;
+    case INITILIZATION:
+    	//TBD, do some init things again
+    	set_software_state(PROP_AUDIO_MODE);
+    	//break; continue to PROP_AUDIO_MODE
     
-    //normal accessable items
+		/* ************ */
+    /* NORMAL MODES */
+		/* ************ */
     case PROP_AUDIO_MODE:
+    	//TBD, check for button press
+    	if(trigger)
+  		{
+		    play_audio();
+  			uint8_t value = get_audio_analysis_0_to_5();
+  			bargraph_only(value, FFT_ANIMATION_DELAY);
+  		}
+    	break;
     case PROP_SILENCE_MODE:
+    	//TBD, check for button press
+    	if(trigger)
+  		{
+  			//TBD, play audio with amp off? or use fake meter RNG routine?
+    		//TBD, update bargraph and meter
+  		}
+    	break;
     case SHOWCASE_MODE:
+    	//TBD, RNG or Button trigger
+    	if(trigger)
+  		{
+    		//TBD, update bargraph and meter
+  		}
+    	break;
     case EMF_MODE:
+    	//TBD, read spare analog input
+    	//TBD, analyze emf
+    	//TBD, play audio
+    	//TBD, update bargraph and meter
     	break;
     
-    
-    //settings items
+		/* ************* */
+    /* SETTING MODES */
+		/* ************* */
     case SET_AUDIO_SELECTION:
-    case SAVE_AUDIO_SELECTION:
-    case EXIT_AUDIO_SELECTION:
+    	// check for button press
+    	if(trigger)
+  		{
+	    	//update audio selection
+		    audio_clip_selected++;
+		    if( ( audio_clip_selected == 0 ) ||
+		        ( audio_clip_selected > MAX_AUDIO_CLIPS ) )
+		    {
+		       audio_clip_selected = 1;
+		    }
+		    
+    		//save selection
+	    	EEPROM.write(EEPROM_ADDRESS_AUDIO_SELECTION, audio_clip_selected);
+    	
+		    //play audio and display number
+		    Serial.println("q"); //stop audio (if playing)
+		    delay(25);
+		    play_audio();
+	    }
+  		bargraph_only(audio_clip_selected, PROP_ANIMATION_DELAY);
     	break;
-    
-    //non assessible items
+    	
+		/* ************ */
+    /* HIDDEN MODES */
+		/* ************ */
+		//we should never be here
+    case EXIT_AUDIO_SELECTION:
     case MENU_SCREEN_WRAP_LOW:
     case MENU_SCREEN_WRAP_HIGH:
     case LAST_MENU_ITEM:
@@ -323,4 +386,47 @@ void bargraph_only(int current_number, byte delay_ms)
 
   //update number
   last_number = current_number;
+}
+
+/* ******************************************************************************
+ * Sub-Functions for Audio
+ ****************************************************************************** */
+
+void play_audio()
+{
+    /*  Finding the least expensive method of sending strings with a variable:
+
+      Method 1: Do not combine Strings
+        Serial.print("#");
+        Serial.println(audio_clip_selected);
+      Conclusion 1: 434 bytes for println val and print const
+
+      Method 2: Combine Strings
+        Serial.println(String("#" + audio_clip_selected));
+      Conclusion 2: 958 bytes for string concatinate
+
+      Method 3: Use constants and branch statements
+        (see below)
+      Conclusion 3: 158 bytes for case switch and println
+  */
+
+  switch (audio_clip_selected)
+  {
+    case 1:
+      Serial.println("#0");
+      break;
+    case 2:
+      Serial.println("#1");
+      break;
+    case 3:
+      Serial.println("#2");
+      break;
+    case 4:
+      Serial.println("#3");
+      break;
+    case 5:
+    default:  //max selection is clamped to 5
+      Serial.println("#4");
+      break;
+  }
 }
