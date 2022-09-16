@@ -1,4 +1,16 @@
-//Source: https://the-techblog.com/en/lightorgan/
+
+/*
+   Prop EMF Reader, based on tv show Supernatural
+   Author: Dustin Westaby
+   Date: July 2015
+
+   Uses audio fx board from adafruit.
+   https://learn.adafruit.com/adafruit-audio-fx-sound-board/
+
+   Build Pictures:
+   https://www.flickr.com/photos/dwest2/albums/72157640062702294
+
+*/
 
 /*
  * Audio Jack to Bargraph Test
@@ -21,12 +33,41 @@
  *                               GND
  */
 
+#include <EEPROM.h>
 #include <arduinoFFT.h>
+#include "buttons.h"
+#include "mode_navigation.h"
 
-#define AUDIO_INPUT_PIN A0
-#define THRESHOLD_INPUT_PIN A1
+/* ----------------------------------
+    Quick Program Switches
+   ---------------------------------- */
+#define ENABLE_SERIAL_DEBUG
 
+#define ANALOG_REFERENCE EXTERNAL //Define as INTERNAL (5V) or EXTERNAL if you wired 3.3V --- 5.1k ohm --- AREF
+
+/* ----------------------------------
+    Animation Information
+   ---------------------------------- */
+#define FFT_ANIMATION_DELAY   1
+#define PROP_ANIMATION_DELAY 50
+
+// after audio is loudness threshold is reached, these defines how fast the lights change
+// 1024 is max responsivness, min smoothing
+//    1 is min responsivness, max smoothing
+#define DECAY_PER_FFT_LOOP  1
+#define GROWTH_PER_FFT_LOOP 5
+
+/* ----------------------------------
+    Pin Defines
+   ---------------------------------- */
+#define AUDIO_INPUT_PIN     A0  // Wiring: A0 --- 10k ohm --- Audio Source
+#define THRESHOLD_INPUT_PIN A1  // POT
+
+#define METER_PIN 11
 #define MAX_METER_OUTPUT 100
+
+// Button triggers effects
+#define HIDDEN_LED_PIN 13
 
 byte LED_PIN_MAP[6] =
 {
@@ -35,78 +76,152 @@ byte LED_PIN_MAP[6] =
   4,   // LED 3
   5,   // LED 4
   6,   // LED 5
+  HIDDEN_LED_PIN,
 };
 
-#define FFT_ANIMATION_DELAY   1
-#define PROP_ANIMATION_DELAY 50
+/* ----------------------------------
+    Globals
+   ---------------------------------- */
+//audio clip selection is stored in eeprom
+byte audio_clip_selected = 1;
+#define MAX_AUDIO_CLIPS 5
+#define EEPROM_ADDRESS_AUDIO_SELECTION 0
 
-/* ******************************************************************************
- * FFT Stuff
- ****************************************************************************** */
-#define SAMPLES 64  // must be a power of 2
- 
-// defines how much brigthness the LEDs will loose each loop
-// 5 is the maximum --> the organ will be very responsive
-// lower will smootly the the leds if no new peak is detected 
-#define decayPerLoop 1
-#define growthPerLoop 5
- 
+//initial data for globals
+byte left_toggle_state = LOW;
+byte right_toggle_state = LOW;
+byte hidden_button_powerup_state = LOW;
+unsigned long lastEvent = 0;
+byte secret_waiting = false;
+
+#define FFT_SAMPLES 64  // must be a power of 2
 arduinoFFT FFT = arduinoFFT();      
 
-typedef enum FREQ_RANGE
-{
-  BASS = 0,
-  MID,
-  HIGHS,
-} freq_range_e;
- 
 /* ******************************************************************************
     Source Code
  ****************************************************************************** */
 void setup()
 {
-  //Serial.begin(9600);
+#ifdef ENABLE_SERIAL_DEBUG
+  Serial.begin(9600);
+#endif
   
-  // define the analog voltage reference
-  analogReference(DEFAULT);
+  analogReference(ANALOG_REFERENCE);
  
+  //setup up output pins, start with LEDs off
   for ( byte i=0; i < sizeof(LED_PIN_MAP); i++)
   {
     pinMode(LED_PIN_MAP[i], OUTPUT);
     digitalWrite(LED_PIN_MAP[i], LOW);
   }
   
-  //Serial.write("FFT Ready");
+  pinMode(METER_PIN, OUTPUT);
+  
+  enable_input_switches();
+
+#ifdef ENABLE_SERIAL_DEBUG
+  Serial.write("EMF Started");
+#endif
+
+  //retrieve and validate data from eeprom
+  audio_clip_selected = EEPROM.read(EEPROM_ADDRESS_AUDIO_SELECTION);
+  if( ( audio_clip_selected == 0 ) ||
+      ( audio_clip_selected > MAX_AUDIO_CLIPS ) )
+  {
+     audio_clip_selected = 1;
+
+     //fix eeprom
+     EEPROM.write(EEPROM_ADDRESS_AUDIO_SELECTION, audio_clip_selected);
+     
+#ifdef ENABLE_SERIAL_DEBUG
+  Serial.write("EEPROM Reset");
+#endif
+  }
+  
+  init_mode_structs();
+
 }
  
     
 void loop()
 {   
-  static long analisis_timer = 0;
+  static long analysis_timer = 0;
+  uint8_t value = 0;
 
   // wait one millisecond for the next analysis
-  if(analisis_timer < millis())
+  if(analysis_timer < millis())
   {
-    analisis_timer = millis() + 1;
+    analysis_timer = millis() + 1;
     
-    analyze_audio_update_bargraph();
+    poll_input_switches();
+    process_mode_selection();
+    
+    run_schedule_for_mode();
+    
+    value = get_audio_analysis_0_to_5();
   }
+  
+  //TBD: do things based on program mode
+  
+  bargraph_only(value, FFT_ANIMATION_DELAY);
+}
+
+void run_schedule_for_mode()
+{
+	switch(get_software_state())
+	{
+    //system items
+    case GO_TO_SLEEP:
+    	//TBD
+    	break;
+    case SLEEPING:
+    	//TBD
+    	break;
+    case INITILIZATION:
+    	set_software_state(INITILIZATION);
+    	break;
+    
+    //normal accessable items
+    case PROP_AUDIO_MODE:
+    case PROP_SILENCE_MODE:
+    case SHOWCASE_MODE:
+    case EMF_MODE:
+    	break;
+    
+    
+    //settings items
+    case SET_AUDIO_SELECTION:
+    case SAVE_AUDIO_SELECTION:
+    case EXIT_AUDIO_SELECTION:
+    	break;
+    
+    //non assessible items
+    case MENU_SCREEN_WRAP_LOW:
+    case MENU_SCREEN_WRAP_HIGH:
+    case LAST_MENU_ITEM:
+    default:
+    	set_software_state(INITILIZATION); //reboot
+      break;
+	}
 }
 
 /* ******************************************************************************
  * Sub-Functions for Audio Analysis
  ****************************************************************************** */
+// Source: https://the-techblog.com/en/lightorgan/
 
-void analyze_audio_update_bargraph()
+uint8_t get_audio_analysis_0_to_5()
 {
-  double vReal[SAMPLES], vImag[SAMPLES];
+  double vReal[FFT_SAMPLES], vImag[FFT_SAMPLES];
   static double max_reading = 5; //assume at least 5
-  static double temp_sums;
+  static uint16_t temp_sums;
   int user_threshold;
+#ifdef ENABLE_SERIAL_DEBUG
   char temp[20];
+#endif
   
-  // collect Samples
-  for(int i=0; i < SAMPLES; i++)
+  // collect FFT_SAMPLES
+  for(int i=0; i < FFT_SAMPLES; i++)
   {
     int sample = analogRead(AUDIO_INPUT_PIN); // read the voltage at the analog pin
     vReal[i] = sample/4-128;        // compress the data and getting rid of DC-Voltage 
@@ -114,17 +229,19 @@ void analyze_audio_update_bargraph()
   }
   
   // let the fourier transform do his magic
-  FFT.Windowing(vReal, SAMPLES, FFT_WIN_TYP_HAMMING, FFT_FORWARD);
-  FFT.Compute(vReal, vImag, SAMPLES, FFT_FORWARD);
-  FFT.ComplexToMagnitude(vReal, vImag, SAMPLES);
+  FFT.Windowing(vReal, FFT_SAMPLES, FFT_WIN_TYP_HAMMING, FFT_FORWARD);
+  FFT.Compute(vReal, vImag, FFT_SAMPLES, FFT_FORWARD);
+  FFT.ComplexToMagnitude(vReal, vImag, FFT_SAMPLES);
   
   // calculate average loudness of the different frequency bands
-  //temp_sums  = calculateBars(vReal, vImag,  1,  3, temp_sums); //Bass
-  temp_sums   = calculateBars(vReal, vImag,  4, 40, temp_sums); //Mids
-  //temp_sums = calculateBars(vReal, vImag, 40, 63, temp_sums); //High
+  //temp_sums  = calculate1024(vReal, vImag,  1,  3, temp_sums); //Bass
+  temp_sums   = calculate1024(vReal, vImag,  4, 40, temp_sums);  //Mids
+  //temp_sums = calculate1024(vReal, vImag, 40, 63, temp_sums);  //High
   
-  //sprintf(temp,"Sum= %i",(int)temp_sums);
-  //Serial.println(temp);
+#ifdef ENABLE_SERIAL_DEBUG
+  sprintf(temp,"Sum= %i",(int)temp_sums);
+  Serial.println(temp);
+#endif
   
   //use max observed for mapping (TBD, allo max reset when audio clips change)
   if(temp_sums > max_reading)
@@ -135,11 +252,14 @@ void analyze_audio_update_bargraph()
   //get user threshold and convert to percent
   user_threshold = map(analogRead(THRESHOLD_INPUT_PIN),0,1023,0,100);
   
-  // light a number of bars matching the average, scaled with max * user percentage
-  bargraph_only(map(temp_sums,0,max_reading*user_threshold/100,0,5), FFT_ANIMATION_DELAY);
+  // return 0-5 matching the average, scaled with max * user percentage
+  return map(temp_sums,0,max_reading*user_threshold/100,0,5);
 }
- 
-double calculateBars(double vReal[], double vImag[], int first, int last, double oldSum){
+
+uint16_t calculate1024(double vReal[], double vImag[], int first, int last, double oldSum)
+{
+	//This function returns a value of 0-1024 for the loudness of the desired frequency band
+	
   double newSum = 0;
  
   // sum up all absolute value of the complex numbers (it's just the pythagorean theorem)
@@ -152,13 +272,14 @@ double calculateBars(double vReal[], double vImag[], int first, int last, double
   newSum = constrain(newSum,0,5000);      // crop the number above 5000 
   newSum = map(newSum,0,5000,0,1024);     // map it between 0 and 1024
  
-  oldSum -= decayPerLoop;                 // substract the decay from the old brightness
+  // add some delays to slow down the animation
+  oldSum -= DECAY_PER_FFT_LOOP; //delay down
   if(newSum > oldSum)
   {
-    // if the old brightness is now lower then the new, the new brightness will be outputted 
-    oldSum += growthPerLoop;
+    oldSum += GROWTH_PER_FFT_LOOP; //delay up
     if(oldSum >= newSum)
     {
+    	// delays complete, clamp
       oldSum = newSum;
     }
   }
