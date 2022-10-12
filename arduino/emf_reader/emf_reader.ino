@@ -61,23 +61,25 @@
     Pin Defines
    ---------------------------------- */
 #define AUDIO_INPUT_PIN     A0  // Wiring: A0 --- 10k ohm --- Audio Source
-#define THRESHOLD_INPUT_PIN A1  // POT
+#define THRESHOLD_INPUT_PIN A7  // POT
 
-#define METER_PIN 11
+#define METER_PIN 9
 #define MAX_METER_OUTPUT 100
 
 // Button triggers effects
-#define HIDDEN_LED_PIN 13
+#define HIDDEN_LED_PIN A5
 
 byte LED_PIN_MAP[6] =
 {
-  2,   // LED 1
-  3,   // LED 2
-  4,   // LED 3
-  5,   // LED 4
-  6,   // LED 5
+  A4,   // LED 1
+  A3,   // LED 2
+  A2,   // LED 3
+  A1,   // LED 4
+  10,   // LED 5
   HIDDEN_LED_PIN,
 };
+
+#define BATT_50PERCENT_PIN A6
 
 /* ----------------------------------
     Globals
@@ -250,7 +252,10 @@ void run_schedule_for_mode()
 		    Serial.println("q"); //stop audio (if playing)
 		    delay(25);
 		    play_audio();
+		    bargraph_only(audio_clip_selected, PROP_ANIMATION_DELAY);
 	    }
+	    
+	    //update bargraph only
   		bargraph_only(audio_clip_selected, PROP_ANIMATION_DELAY);
     	break;
     	
