@@ -3,19 +3,25 @@
  *
  *  Created on: Jul 15, 2022
  *      Author: Dustin Westaby
+ *      
+ *  Usage: process button states after polling.
+ *   IS_NOT_PRESSED = Idle state
+ *   IS_PRESSED     = Button was "just" pressed
+ *   WAS_RELEASED   = Button was "just" released
+ *   IS_HELD        = Button was held for more than 
+ *                    one cycle.  Combine with a timer.
+ *   
+ *   IS_PRESSED should not be used if you need to take actions 
+ *     for both press and hold.  Use WAS_RELEASED and IS_HELD.
  */
 
 #include "buttons.h"
 
-#define HIDDEN_BUTTON_PIN 12
-#define TOGGLE_LEFT_PIN 9
-#define TOGGLE_RIGHT_PIN 8
-
 byte pinMap_buttons[NUMBER_OF_BUTTONS] =
 {
-  HIDDEN_BUTTON_PIN,
-  TOGGLE_LEFT_PIN,
-  TOGGLE_RIGHT_PIN,
+  2, // HIDDEN_BUTTON
+  3, // TOGGLE_LEFT
+  8, // TOGGLE_RIGHT
 };
 
 byte button_state[NUMBER_OF_BUTTONS] = 
